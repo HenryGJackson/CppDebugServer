@@ -24,10 +24,12 @@ There are a few interesting concepts involved in CppDebugServer.
     * Each setting should come as the first thing on each line, followed by exactly one space and then the value for the setting.
 
     * In cases where a setting is a list of values, these should follow the following syntax: <br />
-    VariableName { <br />
-        value0 <br />
-        value1 <br />
-    } <br />
+     ```
+     VariableName {
+         value0
+         value1
+     }
+     ```
 
     Every CppDebugServer project requires a server_config file.
     This should be placed in your bin directory or wherever your executable will be run from.

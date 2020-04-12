@@ -1,6 +1,8 @@
 # CppDebugServer
  
-The goal of CppDebugServer is to provide an easy, quick-setup Debug Render application for use with C++ applications.
+The goal of CppDebugServer is to provide an easy, quick-setup Debug Render application for use with C++ applications either running on the local machine or remotely.
+
+Windows and linux are currently supported and this library was initially designed for use with raspberry pi so it works there too.
 
 CppDebugServer gives users control to render data in a way that suits their application and allows them to easily hook into their application data with minimal/no need to modifiy existing code. 
 

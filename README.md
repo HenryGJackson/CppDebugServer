@@ -20,6 +20,9 @@ There are a few interesting concepts involved in CppDebugServer.
     ADD_REQUEST_HANDLER(id) where id is the unique id you have given to this handler. This id is important, it's what you'll use on the js side to request this data.
 
 ## Config: 
+Every CppDebugServer project requires a server_config file.
+This should be named "server_config" with no extension and placed in your bin directory or wherever your executable will be run from.
+    
 * Syntax:
     * Each setting should come as the first thing on each line, followed by exactly one space and then the value for the setting.
 
@@ -30,9 +33,6 @@ There are a few interesting concepts involved in CppDebugServer.
          value1
      }
      ```
-
-    Every CppDebugServer project requires a server_config file.
-    This should be placed in your bin directory or wherever your executable will be run from.
 
     There are a few parameters you can specify in this file but first, I will concentrate on the most important.
 

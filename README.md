@@ -8,16 +8,22 @@ CppDebugServer gives users control to render data in a way that suits their appl
 
 There are a few interesting concepts involved in CppDebugServer.
 ## In C++:
-* Run the server: 
-    Before entering the main loop, use the provided macro (#include <server.h>): RUN_DEBUG_SERVER(port), specifying the port you want to run the server on.
+* #include <server.h>
 
-* For all data that needs to be rendered,
-    add in a global scope:
-        DEFINE_<ContentType>_REQUEST_HANDLER 
-        Currently Supported <ContentType>s are ARRAY and VECTOR
+* Run the server: <br/>
+    * RUN_DEBUG_SERVER(port): <br/>
+    At some point in the start-up of your application, before entering the main loop, use this macro, specifying the port you want to run the server on.
 
-    Before entering the main loop, use the provided macro (#include <server.h>): 
-    ADD_REQUEST_HANDLER(id) where id is the unique id you have given to this handler. This id is important, it's what you'll use on the js side to request this data.
+* Define Request Handlers: <br/>
+These are the the functions that will be called by the server when a data request is made. You can define them yourself following the required syntax and rules. Or, helper macros are provided to make this easier.
+     * DEFINE_ARRAY_REQUEST_HANDLER(ptr, count, dataId): <br/> 
+     takes a pointer to the first element of an array, the number of elements and the id that should be used to identify this array.
+     * DEFINE_VECTOR_REQUEST_HANDLER(vector, dataId): <br/> 
+     works just like DEFINE_ARRAY_REQUEST_HANDLER but instead takes a std::vector (or any other object that implements the data() function).
+
+* Register Request Handlers: <br/>
+     * ADD_REQUEST_HANDLER(dataId): <br/>
+     is used to register a request hanlder with the server. Now, when it gets a data request, it will call your handler, which should use the dataId to check whether it is the correct handler for the request.
 
 ## Config: 
 Every CppDebugServer project requires a server_config file.
@@ -34,11 +40,12 @@ This should be named "server_config" with no extension and placed in your bin di
      }
      ```
 
-    There are a few parameters you can specify in this file but first, I will concentrate on the most important.
+There are a few parameters you can specify in this file but first, I will concentrate on the most important.
+* Parameters:
 
-    WEB_FILES_ROOT: This is where all of your user scripts will live and the location that will be used to search for all files that are requested by the client.
+    * WEB_FILES_ROOT: This is where all of your user scripts will live and the location that will be used to search for all files that are requested by the client.
 
-    USER_SCRIPTS: This is how you do your rendering. All rendering in CppDebugServer is handled using Three.js to render in-browser. So in this variable is where you should
+    * USER_SCRIPTS: This is how you do your rendering. All rendering in CppDebugServer is handled using Three.js to render in-browser. So in this variable is where you should
 
 ## In Js:
 All of your rendering should be done in user scripts that you specify using the USER_SCRIPTS parameter in your server_config file.

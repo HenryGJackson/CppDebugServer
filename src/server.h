@@ -27,59 +27,6 @@ typedef int socket_t;
 struct timeval;
 
 //////////////////////////////////////////////////////////////////////////////////////////
-// Helper macros to make it easy to add data request handlers
-#define DEBUG_SERVER
-
-#ifdef DEBUG_SERVER
-
-#define RUN_DEBUG_SERVER(port, path) { Server::initiate(port, path); }
-#define JOIN_DEBUG_SERVER { Server::join(); }
-#define KILL_DEBUG_SERVER { Server::kill(); }
-
-#define MAKE_REQUEST_HANDLER_NAME(id) on ## id ## Request
-#define MAKE_REQUEST_HANDLER_SIGNATURE(id) bool MAKE_REQUEST_HANDLER_NAME(id)(const std::string& requestedData, std::string& contentOut)
-
-#define DEFINE_ARRAY_REQUEST_HANDLER(ptr, elementCount, id)						\
-MAKE_REQUEST_HANDLER_SIGNATURE(id)										\
-{																		\
-	if (requestedData != #id)											\
-			return false;												\
-																		\
-	contentOut = ServerUtils::toString(ptr, elementCount);	\
-	return true;														\
-}
-
-#define DEFINE_VECTOR_REQUEST_HANDLER(vector, id)						\
-MAKE_REQUEST_HANDLER_SIGNATURE(id)										\
-{																		\
-	if (requestedData != #id)											\
-			return false;												\
-																		\
-	contentOut = ServerUtils::toString(vector.data(), vector.size());	\
-	return true;														\
-}
-
-#define DEFINE_VECTOR3_REQUEST_HANDLER(vector, id)			\
-MAKE_REQUEST_HANDLER_SIGNATURE(id)							\
-{															\
-	if (requestedData != #id)								\
-			return false;									\
-															\
-	contentOut = ServerUtils::toString(vector.data(), 3);	\
-	return true;											\
-}
-
-#define ADD_REQUEST_HANDLER(id) { Server::addDataRequestHandler(MAKE_REQUEST_HANDLER_NAME(id)); }
-#else
-#define DEFINE_VECTOR_REQUEST_HANDLER(vector, id)
-#define DEFINE_VECTOR3_REQUEST_HANDLER(vector, id)
-#define ADD_REQUEST_HANDLER(id)
-#define RUN_DEBUG_SERVER(port)
-#define JOIN_DEBUG_SERVER  
-#define KILL_DEBUG_SERVER 
-#endif
-
-//////////////////////////////////////////////////////////////////////////////////////////
 
 class TCPSocketResponder
 {
@@ -157,7 +104,5 @@ private:
 	static std::string sSystemFiles;
 	static std::string sUserScripts;
 };
-
-//////////////////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////////////////////

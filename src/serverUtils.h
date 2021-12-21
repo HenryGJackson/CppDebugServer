@@ -45,20 +45,13 @@ namespace parser
 		Argument_Count
 	};
 
-	/*template <>
-	const std::string ArgumentsParser<ServerArguments>::s_argNames[ServerArguments::Argument_Count][ArgType_Count] =
-	{
-		{"-settings_path", "-s"}
-		, {"-port", "-p"}
-	};*/
-
 	struct ServerArgParser : public ArgumentsParser<ServerArguments>
 	{
 		int getPort() const;
 		const std::string& getSettingsFile() const;
 	};
 
-	const std::string ServerArgParser::s_argNames[ServerArguments::Argument_Count][ArgType_Count] =
+	const std::string ServerArgParser::s_argNames[ServerArguments::Argument_Count][ArgForm::ArgForm_Count] =
 	{
 		{"-settings_path", "-s"}
 		, {"-port", "-p"}

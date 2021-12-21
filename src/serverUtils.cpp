@@ -84,6 +84,6 @@ namespace parser
 
 	const std::string& ServerArgParser::getSettingsFile() const
 	{
-		return argValues[ServerArguments::Argument_SettingsPath];
+		return getArgValue(ServerArguments::Argument_SettingsPath);
 	}
 }

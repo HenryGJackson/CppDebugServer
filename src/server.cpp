@@ -13,6 +13,7 @@
 
 #include "server.h"
 #include "serverUtils.h"
+#include <Common/ErrorHandling.h>
 
 #ifdef WIN32
 #include <io.h>
@@ -36,11 +37,14 @@ Server::sThread;
 socket_t
 Server::sSocket;
 
-std::vector<Server::onDataRequestFunc>
+std::vector<const Server::DataRequestHandler*>
 Server::sDataRequestHandlers;
 
 std::string
 Server::sRootWebDir;
+
+std::string
+Server::sSystemFiles;
 
 std::string
 Server::sUserScripts;
@@ -114,10 +118,10 @@ Server::buildResponseHeader(const std::string& contentType, const std::string& c
 {
 	uint32_t contentLength = content.size();
 	std::string header(
-		"HTTP/1.1 200 OK\nContent-Type: " + contentType + 
-		"\nContent-Length: " + std::to_string(contentLength) + 
-		"\n\n" + content);
-
+		"HTTP/1.1 200 OK\r\nContent-Type: " + contentType + 
+		"\r\nContent-Length: " + std::to_string(contentLength) + 
+		"\r\n\n" + content);
+	std::cout << content << std::endl;
 	return header;
 }
 
@@ -140,16 +144,12 @@ Server::isDataRequest(const std::string& requestedObject)
 void
 Server::makeIndexHeader(std::string& result)
 {
-	std::string path = sRootWebDir + "html/indexHeader.html";
+	std::string path = sSystemFiles + "\\html\\indexHeader.html";
 
 	// Read in the index header file.
 	std::fstream file;
 	file.open(path, std::fstream::in);
-	if (!file.is_open())
-	{
-		perror("Failed to open settings file. Continuing with defaults. Things may not work..");
-		return;
-	}
+	COM_ASSERT(file.is_open(), "Failed to open settings file. Continuing with defaults. Things may not work..");
 
 	// write the index html file to our result string
 	result = std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
@@ -157,11 +157,7 @@ Server::makeIndexHeader(std::string& result)
 
 	// Find the point at which we should insert the user scripts
 	size_t pos = result.find("</body>");
-	if (pos == std::string::npos)
-	{
-		perror("Failed finding entry point in indexHeader.html");
-		return;
-	}
+	COM_ASSERT(pos != std::string::npos, "Failed finding entry point in indexHeader.html");
 
 	std::string userScript;
 	std::string sciptTagStart("<script src=\"");
@@ -185,7 +181,7 @@ Server::onFileRequest(const std::string& requestedFileName, std::string& headerO
 	std::string content;
 	if (requestedFileName == "")
 	{
-		contentType = "html";
+		contentType = "text/html";
 		makeIndexHeader(content);
 	}
 	else
@@ -216,33 +212,38 @@ Server::onDataRequest(const std::string& requestedData, std::string& headerOut)
 	}
 
 	// Call all handlers and expect them to early out if they do not handle the requested data
+	std::string dataToBeHandled = requestedData.substr(5);
+
 	std::string content;
-	for (onDataRequestFunc handler : sDataRequestHandlers)
+	for (const DataRequestHandler* handler : sDataRequestHandlers)
 	{
-		if (!handler(requestedData.substr(5), content))
+		if (handler->dataName != dataToBeHandled)
 			continue;
 
+		handler->handle(dataToBeHandled, content);
+		
 		headerOut = buildResponseHeader("text/plain", content);
 		return true;
 	}
 
-	perror("Unhandled data request");
+	COM_THROW("Unhandled data request");
 	return false;
 }
 
 void
-Server::addDataRequestHandler(onDataRequestFunc handler)
+Server::addDataRequestHandler(const DataRequestHandler* toAdd)
 {
-	if (std::find(sDataRequestHandlers.begin(), sDataRequestHandlers.end(), handler) != sDataRequestHandlers.end())
+	auto it = std::find(sDataRequestHandlers.begin(), sDataRequestHandlers.end(), toAdd);
+	if (it != sDataRequestHandlers.end())
 		return;
 
-	sDataRequestHandlers.push_back(handler);
+	sDataRequestHandlers.push_back(toAdd);
 }
 
 void
-Server::removeDataRequestHandler(onDataRequestFunc handler)
+Server::removeDataRequestHandler(const DataRequestHandler* toRemove)
 {
-	auto it = std::find(sDataRequestHandlers.begin(), sDataRequestHandlers.end(), handler);
+	auto it = std::find(sDataRequestHandlers.begin(), sDataRequestHandlers.end(), toRemove);
 	if (it == sDataRequestHandlers.end())
 		return;
 
@@ -250,18 +251,67 @@ Server::removeDataRequestHandler(onDataRequestFunc handler)
 }
 
 bool
-Server::handleRequest(socket_t fd, fd_set& fdSet, timeval& timeout, const sockaddr_in address, socklen_t addrlen)
+TCPSocketResponder::OpenSocket(int port)
 {
+	m_port = port;
+	m_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	COM_ASSERT(m_socket != s_invalidSocket, "Failed to open socket");
+
+	unsigned long val = 10000;
+	setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&val, sizeof(unsigned long));
+
+	return true;
+}
+
+bool
+TCPSocketResponder::BindSocket()
+{
+	COM_ASSERT(m_socket != s_invalidSocket, "Socket not openned");
+
+	m_address.sin_family = AF_INET;
+	m_address.sin_addr.s_addr = INADDR_ANY;
+	m_address.sin_port = htons(m_port);
+
+	memset(m_address.sin_zero, '\0', sizeof m_address.sin_zero);
+
+	if (bind(m_socket, (struct sockaddr*)&m_address, sizeof(m_address)) < 0)
+	{
+		COM_THROW("Failed to bind socket");
+	}
+
+	if (listen(m_socket, 10) < 0)
+	{
+		COM_THROW("Error listening to socket");
+	}
+
+	FD_ZERO(&m_set);
+	FD_SET(m_socket, &m_set);
+
+	return true;
+}
+
+void
+TCPSocketResponder::SetTimeout(timeval to)
+{
+	m_timeout = to;
+}
+
+bool 
+TCPSocketResponder::PollSocket(bool& hasRequest)
+{
+	COM_ASSERT(m_socket != s_invalidSocket, "Socket not openned");
+
 #ifndef WIN32
 	static constexpr int flags = (POLLRDNORM | POLLWRNORM | POLLWRBAND | POLLIN | POLLRDBAND | POLLPRI);
-	pollfd pfd = { fd, flags, 0 };
+	pollfd pfd = { m_socket, flags, 0 };
 	int pollResult = poll(&pfd, 1, 1 /*ms*/);
 #else
 	static constexpr int flags = (POLLIN | POLLOUT);
-	pollfd pfd = { fd, flags, 0 };
+	pollfd pfd = { m_socket, flags, 0 };
 	int pollResult = WSAPoll(&pfd, 1, 1 /*ms*/);
 #endif
-	  
+
+	// Check we didn't get any socket errors
 	if (pfd.revents)
 	{
 		if (pfd.revents & (POLLERR | POLLHUP))
@@ -274,27 +324,80 @@ Server::handleRequest(socket_t fd, fd_set& fdSet, timeval& timeout, const sockad
 		}
 	}
 
-	if (pollResult < 0)
-	{
-		int lastError = WSAGetLastError();
-		std::cout << "Error: " << lastError << std::endl;
-		perror("In poll");
+
+	COM_ASSERT_LAST_ERROR((pollResult >= 0), "Failed to poll socket");
+	
+	hasRequest = pollResult > 0;
+	return true;
+}
+
+void
+TCPSocketResponder::CreateBuffer(uint32_t size)
+{
+	m_buffer.resize(size);
+	std::memset(m_buffer.data(), 0, size);
+}
+
+bool
+TCPSocketResponder::AcceptRequest(std::string& requestOut)
+{
+	COM_ASSERT(m_socket != s_invalidSocket, "Socket not openned");
+	COM_ASSERT(m_tmpSocket == s_invalidSocket, "Temp socket already valid");
+
+	int addrlen = sizeof(m_address);
+	int new_socket = accept(m_socket, (struct sockaddr*)&m_address, &addrlen);
+	COM_ASSERT_LAST_ERROR((new_socket != s_invalidSocket), "Failed to accept socket");
+
+	long valread = recv(new_socket, m_buffer.data(), m_buffer.size(), 0);
+	requestOut = m_buffer.data();
+
+	m_tmpSocket = new_socket;
+	return true;
+}
+
+void
+TCPSocketResponder::Respond(const std::string& response)
+{
+	COM_ASSERT(m_socket != s_invalidSocket, "Socket not openned");
+
+	int result = send(m_tmpSocket, response.c_str(), response.length(), 0);
+	COM_ASSERT_LAST_ERROR(result != SOCKET_ERROR, "Failed responding to request");
+
+#ifdef WIN32
+	result = closesocket(m_tmpSocket);
+	COM_ASSERT_LAST_ERROR(result != SOCKET_ERROR, "Failed closing socket");
+#else
+	close(m_tmpSocket);
+#endif
+	m_tmpSocket = s_invalidSocket;
+}
+
+void
+TCPSocketResponder::CloseSocket()
+{
+#ifdef WIN32
+	int result = closesocket(m_socket);
+	COM_ASSERT_LAST_ERROR(result != SOCKET_ERROR, "Failed closing socket");
+#else
+	close(m_socket);
+#endif
+	m_socket = -1;
+}
+
+bool
+Server::handleRequest(TCPSocketResponder& responder)
+{
+	bool hasRequest;
+	if (!responder.PollSocket(hasRequest))
 		return false;
-	}
-	else if (pollResult == 0)
+
+	if (!hasRequest)
 		return true;
 
-	int new_socket = accept(fd, (struct sockaddr *)&address, &addrlen);
-	if (new_socket < 0)
-	{
-		perror("In accept");
-		return false;
-	}
+	std::string request;
+	responder.AcceptRequest(request);
 
-	char buffer[30000] = { 0 };
-	long valread = recv(new_socket, buffer, 30000, 0);
-
-	std::string requestedObject = getObjectNameFromRequestHeader((const char*)buffer, 30000);
+	std::string requestedObject = getObjectNameFromRequestHeader(request.c_str(), request.length());
 
 	std::string header;
 	bool success = false;
@@ -304,12 +407,10 @@ Server::handleRequest(socket_t fd, fd_set& fdSet, timeval& timeout, const sockad
 		success = onFileRequest(requestedObject, header);
 
 	if (success)
-		send(new_socket, header.c_str(), header.length(), 0);
+		responder.Respond(header);
 	else
-		perror("Could not send data");
-	
-	closeSocket(new_socket);
-	
+		COM_THROW("Could not send data");
+
 	return true;
 }
 
@@ -319,68 +420,56 @@ Server::runServer(int port)
 #ifdef WIN32
 	WORD versionWanted = MAKEWORD(1, 1);
 	WSADATA wsaData;
-	WSAStartup(versionWanted, &wsaData);
+	if (WSAStartup(versionWanted, &wsaData))
+		COM_THROW_LAST_ERROR("Failed in WSAStartup");
 #endif
 
-	sSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (sSocket < 0)
-	{
-		perror("In socket");
+	TCPSocketResponder responder;
+	if (!responder.OpenSocket(port))
 		return;
-	}
 
-	unsigned long val = 10000;
-	setsockopt(sSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&val, sizeof(unsigned long));
-
-	struct sockaddr_in address;
-	int addrlen = sizeof(address);
-
-	address.sin_family = AF_INET;
-	address.sin_addr.s_addr = INADDR_ANY;
-	address.sin_port = htons(port);
-
-	memset(address.sin_zero, '\0', sizeof address.sin_zero);
-
-	if (bind(sSocket, (struct sockaddr *)&address, sizeof(address)) < 0)
-	{
-		perror("In bind"); 
+	if (!responder.BindSocket())
 		return;
-	}
-	if (listen(sSocket, 10) < 0)
-	{
-		perror("In listen");
-		return;
-	}
 
-	fd_set set;
-	FD_ZERO(&set);
-	FD_SET(sSocket, &set);
+	responder.SetTimeout({ 0 /*s*/, 100 /*ms*/ });
+	responder.CreateBuffer(2048);
 
-	timeval timeout = { 0 /*s*/, 100 /*ms*/ };
-
-	while (handleRequest(sSocket, set, timeout, address, addrlen) && sRunServer)
+	while (handleRequest(responder) && sRunServer)
 	{
 		std::this_thread::sleep_for(std::chrono::microseconds(1000));
 	}
 
-	closeSocket(sSocket);
+	responder.CloseSocket();
+
 	std::cout << "Server exiting" << std::endl;
 #ifdef WIN32
-	WSACleanup();
+	if (WSACleanup())
+		COM_THROW_LAST_ERROR("Failed in WSACleanup");
 #endif
 }
 
 void
-Server::initiate(int port)
+Server::initiate(int port, const char* settingsPath)
 {
-	ServerUtils::SettingsVector settings;
-	ServerUtils::readSettings(settings);
-	applySettings(settings);
+	try
+	{
+		ServerUtils::SettingsVector settings;
+		if (!ServerUtils::readSettings(settings, settingsPath))
+			return;
 
-	sThread = std::thread(runServer, port);
+		applySettings(settings);
+		//runServer(port);
+		sThread = std::thread(runServer, port);
 #ifndef WIN32
-	ServerUtils::setupQuitHandler();
+		ServerUtils::setupQuitHandler();
 #endif
+	}
+	catch (com::Exception* e)
+	{
+#ifdef WIN32
+		MessageBoxA(NULL, e->what(), "Server Error", MB_ICONERROR | MB_OK);
+#endif
+	}
 }
 
 void
@@ -416,7 +505,8 @@ static const T getSetting(const std::string& setting, const T defaultValue, cons
 void
 Server::applySettings(const ServerUtils::SettingsVector& settings)
 {
-	sRootWebDir = getSetting("WEB_FILES_ROOT", std::experimental::filesystem::current_path().string(), settings);
-	sUserScripts = getSetting("USER_SCRIPTS", std::experimental::filesystem::current_path().string(), settings);
+	sRootWebDir = getSetting("WEB_FILES_ROOT", std::filesystem::current_path().string(), settings);
+	sSystemFiles = getSetting("SYSTEM_FILES", std::filesystem::current_path().string(), settings);
+	sUserScripts = getSetting("USER_SCRIPTS", std::filesystem::current_path().string(), settings);
 }
 

@@ -4,13 +4,13 @@
 #include "serverUtils.h"
 #include "server.h"
 
-bool ServerUtils::readSettings(SettingsVector& settingsOut)
+bool ServerUtils::readSettings(SettingsVector& settingsOut, const char* pathCStr)
 {
-	auto path = std::experimental::filesystem::current_path();
+	std::string path(pathCStr);
 #ifdef TEST_CONFIG
-	path.concat("\\..\\..\\server_config");
+	path.concat("\\..\\..\\server_config.cfg");
 #else
-	path.concat("\\..\\server_config");
+	path += "\\server_config.cfg";
 #endif
 	std::fstream file;
 	file.open(path, std::fstream::in);
@@ -67,6 +67,23 @@ void ServerUtils::setupQuitHandler()
 	sigIntHandler.sa_flags = 0;
 
 	sigaction(SIGINT, &sigIntHandler, NULL);
-
 }
 #endif
+
+namespace parser
+{
+	int ServerArgParser::getPort() const
+	{
+		const std::string& portString = getArgValue(ServerArguments::Argument_Port);
+
+		if (!portString.empty())
+			return std::stoi(portString);
+
+		return 8080;
+	}
+
+	const std::string& ServerArgParser::getSettingsFile() const
+	{
+		return argValues[ServerArguments::Argument_SettingsPath];
+	}
+}

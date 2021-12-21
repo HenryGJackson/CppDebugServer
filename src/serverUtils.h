@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <Common/ArgumentParser.h>
 
 struct ServerUtils
 {
@@ -26,11 +27,40 @@ struct ServerUtils
 	typedef std::pair<std::string, std::string> SettingValuePair;
 	typedef std::vector<std::pair<std::string, std::string>> SettingsVector;
 
-	static bool readSettings(SettingsVector& settingsOut);
+	static bool readSettings(SettingsVector& settingsOut, const char* path);
 
 #ifndef WIN32
 	static void quitHandler(int signal);
 
 	static void setupQuitHandler();
 #endif
+};
+
+namespace parser
+{
+	enum ServerArguments : unsigned int
+	{
+		Argument_SettingsPath = 0,
+		Argument_Port,
+		Argument_Count
+	};
+
+	/*template <>
+	const std::string ArgumentsParser<ServerArguments>::s_argNames[ServerArguments::Argument_Count][ArgType_Count] =
+	{
+		{"-settings_path", "-s"}
+		, {"-port", "-p"}
+	};*/
+
+	struct ServerArgParser : public ArgumentsParser<ServerArguments>
+	{
+		int getPort() const;
+		const std::string& getSettingsFile() const;
+	};
+
+	const std::string ServerArgParser::s_argNames[ServerArguments::Argument_Count][ArgType_Count] =
+	{
+		{"-settings_path", "-s"}
+		, {"-port", "-p"}
+	};
 };

@@ -49,207 +49,6 @@ Server::sSystemFiles;
 std::string
 Server::sUserScripts;
 
-std::string 
-Server::getObjectNameFromRequestHeader(const char* request, uint32_t length)
-{
-	std::string str(request);
-
-	// Get the position of the first place of what is being requested
-	size_t startIt = str.find("GET /") + 5;
-	if (startIt >= str.size())
-		return "";
-
-	// Find the end of the object name
-	size_t endIt = str.find(" ", startIt);
-
-	// Return the requested object name
-	return str.substr(startIt, endIt - startIt);
-}
-
-bool
-Server::loadRequestedFile(const std::string& filename, char** bufOut, uint64_t& lengthOut)
-{
-	std::string fullFilePath = sRootWebDir + filename;
-#ifdef WIN32
-	FILE *f = nullptr;
-	fopen_s(&f, fullFilePath.c_str(), "rb");
-#else
-	FILE *f = fopen(fullFilePath.c_str(), "rb");
-#endif
-	if (f == nullptr)
-	{
-		std::cout << "Failed to read file: " << fullFilePath << std::endl;
-		return false;
-	}
-
-	// get the total length of the file
-	fseek(f, 0, SEEK_END);
-	lengthOut = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	
-	// Allocate the buffer and write the file contents to it
-	*bufOut = new char[(unsigned int)lengthOut];
-	fread(*bufOut, (size_t)lengthOut, 1, f);
-
-	fclose(f);
-	return true;
-}
-
-bool
-Server::getContentTypeFromFileName(const std::string& filename, std::string& contentType)
-{
-	// Given a filename, use the extension to determine the content type
-	std::string extension = filename.substr(filename.find_last_of(".") + 1);
-	if (extension == "html")
-	{
-		contentType = "text/html";
-		return true;
-	}
-	else if (extension == "js")
-	{
-		contentType = "text/javascript";
-		return true;
-	}
-	return false;
-}
-
-std::string
-Server::buildResponseHeader(const std::string& contentType, const std::string& content)
-{
-	uint32_t contentLength = content.size();
-	std::string header(
-		"HTTP/1.1 200 OK\r\nContent-Type: " + contentType + 
-		"\r\nContent-Length: " + std::to_string(contentLength) + 
-		"\r\n\n" + content);
-	std::cout << content << std::endl;
-	return header;
-}
-
-void
-Server::closeSocket(socket_t socket)
-{
-#ifdef WIN32
-	closesocket(socket);
-#else
-	close(socket);
-#endif
-}
-
-bool
-Server::isDataRequest(const std::string& requestedObject)
-{
-	return requestedObject.substr(0, 4) == "data";
-}
-
-void
-Server::makeIndexHeader(std::string& result)
-{
-	std::string path = sSystemFiles + "\\html\\indexHeader.html";
-
-	// Read in the index header file.
-	std::fstream file;
-	file.open(path, std::fstream::in);
-	COM_ASSERT(file.is_open(), "Failed to open settings file. Continuing with defaults. Things may not work..");
-
-	// write the index html file to our result string
-	result = std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-	file.close();
-
-	// Find the point at which we should insert the user scripts
-	size_t pos = result.find("</body>");
-	COM_ASSERT(pos != std::string::npos, "Failed finding entry point in indexHeader.html");
-
-	std::string userScript;
-	std::string sciptTagStart("<script src=\"");
-	std::string scriptTagEnd("\"></script>");
-
-	// Add script tags for each of the user scripts
-	std::stringstream ss(sUserScripts);
-	while (std::getline(ss, userScript, ','))
-	{
-		userScript = sciptTagStart + userScript + scriptTagEnd;
-		result.insert(pos, userScript);
-		pos += userScript.length();
-	}
-}
-
-bool
-Server::onFileRequest(const std::string& requestedFileName, std::string& headerOut)
-{
-	// Get the requeste file from the client. If there is no file specified, give the startup page
-	std::string contentType;
-	std::string content;
-	if (requestedFileName == "")
-	{
-		contentType = "text/html";
-		makeIndexHeader(content);
-	}
-	else
-	{
-		char* buf;
-		uint64_t length;
-		if (!loadRequestedFile(requestedFileName, &buf, length))
-			return false;
-
-		if (!getContentTypeFromFileName(requestedFileName, contentType))
-			return false;
-
-		content = std::string(buf, (unsigned int)length);
-	}
-
-	headerOut = buildResponseHeader(contentType, content);
-	return true;
-}
-
-bool
-Server::onDataRequest(const std::string& requestedData, std::string& headerOut)
-{
-	// We know that the "data/" portion of the request takes up 5 characters so we expect at least 6
-	if (requestedData.length() < 6)
-	{
-		std::cout << "Asked for data without specifying which" << std::endl;
-		return false;
-	}
-
-	// Call all handlers and expect them to early out if they do not handle the requested data
-	std::string dataToBeHandled = requestedData.substr(5);
-
-	std::string content;
-	for (const DataRequestHandler* handler : sDataRequestHandlers)
-	{
-		if (handler->dataName != dataToBeHandled)
-			continue;
-
-		handler->handle(dataToBeHandled, content);
-		
-		headerOut = buildResponseHeader("text/plain", content);
-		return true;
-	}
-
-	COM_THROW("Unhandled data request");
-	return false;
-}
-
-void
-Server::addDataRequestHandler(const DataRequestHandler* toAdd)
-{
-	auto it = std::find(sDataRequestHandlers.begin(), sDataRequestHandlers.end(), toAdd);
-	if (it != sDataRequestHandlers.end())
-		return;
-
-	sDataRequestHandlers.push_back(toAdd);
-}
-
-void
-Server::removeDataRequestHandler(const DataRequestHandler* toRemove)
-{
-	auto it = std::find(sDataRequestHandlers.begin(), sDataRequestHandlers.end(), toRemove);
-	if (it == sDataRequestHandlers.end())
-		return;
-
-	sDataRequestHandlers.erase(it);
-}
-
 bool
 TCPSocketResponder::OpenSocket(int port)
 {
@@ -384,6 +183,207 @@ TCPSocketResponder::CloseSocket()
 	m_socket = -1;
 }
 
+std::string
+Server::getObjectNameFromRequestHeader(const char* request, uint32_t length)
+{
+	std::string str(request);
+
+	// Get the position of the first place of what is being requested
+	size_t startIt = str.find("GET /") + 5;
+	if (startIt >= str.size())
+		return "";
+
+	// Find the end of the object name
+	size_t endIt = str.find(" ", startIt);
+
+	// Return the requested object name
+	return str.substr(startIt, endIt - startIt);
+}
+
+bool
+Server::loadRequestedFile(const std::string& filename, char** bufOut, uint64_t& lengthOut)
+{
+	std::string fullFilePath = sRootWebDir + filename;
+#ifdef WIN32
+	FILE* f = nullptr;
+	fopen_s(&f, fullFilePath.c_str(), "rb");
+#else
+	FILE* f = fopen(fullFilePath.c_str(), "rb");
+#endif
+	if (f == nullptr)
+	{
+		std::cout << "Failed to read file: " << fullFilePath << std::endl;
+		return false;
+	}
+
+	// get the total length of the file
+	fseek(f, 0, SEEK_END);
+	lengthOut = ftell(f);
+	fseek(f, 0, SEEK_SET);
+
+	// Allocate the buffer and write the file contents to it
+	*bufOut = new char[(unsigned int)lengthOut];
+	fread(*bufOut, (size_t)lengthOut, 1, f);
+
+	fclose(f);
+	return true;
+}
+
+bool
+Server::getContentTypeFromFileName(const std::string& filename, std::string& contentType)
+{
+	// Given a filename, use the extension to determine the content type
+	std::string extension = filename.substr(filename.find_last_of(".") + 1);
+	if (extension == "html")
+	{
+		contentType = "text/html";
+		return true;
+	}
+	else if (extension == "js")
+	{
+		contentType = "text/javascript";
+		return true;
+	}
+	return false;
+}
+
+std::string
+Server::buildResponseHeader(const std::string& contentType, const std::string& content)
+{
+	uint32_t contentLength = content.size();
+	std::string header(
+		"HTTP/1.1 200 OK\r\nContent-Type: " + contentType +
+		"\r\nContent-Length: " + std::to_string(contentLength) +
+		"\r\n\n" + content);
+	std::cout << content << std::endl;
+	return header;
+}
+
+void
+Server::closeSocket(socket_t socket)
+{
+#ifdef WIN32
+	closesocket(socket);
+#else
+	close(socket);
+#endif
+}
+
+bool
+Server::isDataRequest(const std::string& requestedObject)
+{
+	return requestedObject.substr(0, 4) == "data";
+}
+
+void
+Server::makeIndexHeader(std::string& result)
+{
+	std::string path = sSystemFiles + "\\html\\indexHeader.html";
+
+	// Read in the index header file.
+	std::fstream file;
+	file.open(path, std::fstream::in);
+	COM_ASSERT(file.is_open(), "Failed to open settings file. Continuing with defaults. Things may not work..");
+
+	// write the index html file to our result string
+	result = std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+	file.close();
+
+	// Find the point at which we should insert the user scripts
+	size_t pos = result.find("</body>");
+	COM_ASSERT(pos != std::string::npos, "Failed finding entry point in indexHeader.html");
+
+	std::string userScript;
+	std::string sciptTagStart("<script src=\"");
+	std::string scriptTagEnd("\"></script>");
+
+	// Add script tags for each of the user scripts
+	std::stringstream ss(sUserScripts);
+	while (std::getline(ss, userScript, ','))
+	{
+		userScript = sciptTagStart + userScript + scriptTagEnd;
+		result.insert(pos, userScript);
+		pos += userScript.length();
+	}
+}
+
+bool
+Server::onFileRequest(const std::string& requestedFileName, std::string& headerOut)
+{
+	// Get the requeste file from the client. If there is no file specified, give the startup page
+	std::string contentType;
+	std::string content;
+	if (requestedFileName == "")
+	{
+		contentType = "text/html";
+		makeIndexHeader(content);
+	}
+	else
+	{
+		char* buf;
+		uint64_t length;
+		if (!loadRequestedFile(requestedFileName, &buf, length))
+			return false;
+
+		if (!getContentTypeFromFileName(requestedFileName, contentType))
+			return false;
+
+		content = std::string(buf, (unsigned int)length);
+	}
+
+	headerOut = buildResponseHeader(contentType, content);
+	return true;
+}
+
+bool
+Server::onDataRequest(const std::string& requestedData, std::string& headerOut)
+{
+	// We know that the "data/" portion of the request takes up 5 characters so we expect at least 6
+	if (requestedData.length() < 6)
+	{
+		std::cout << "Asked for data without specifying which" << std::endl;
+		return false;
+	}
+
+	// Call all handlers and expect them to early out if they do not handle the requested data
+	std::string dataToBeHandled = requestedData.substr(5);
+
+	std::string content;
+	for (const DataRequestHandler* handler : sDataRequestHandlers)
+	{
+		if (handler->dataName != dataToBeHandled)
+			continue;
+
+		handler->handle(dataToBeHandled, content);
+
+		headerOut = buildResponseHeader("text/plain", content);
+		return true;
+	}
+
+	COM_THROW("Unhandled data request");
+	return false;
+}
+
+void
+Server::addDataRequestHandler(const DataRequestHandler* toAdd)
+{
+	auto it = std::find(sDataRequestHandlers.begin(), sDataRequestHandlers.end(), toAdd);
+	if (it != sDataRequestHandlers.end())
+		return;
+
+	sDataRequestHandlers.push_back(toAdd);
+}
+
+void
+Server::removeDataRequestHandler(const DataRequestHandler* toRemove)
+{
+	auto it = std::find(sDataRequestHandlers.begin(), sDataRequestHandlers.end(), toRemove);
+	if (it == sDataRequestHandlers.end())
+		return;
+
+	sDataRequestHandlers.erase(it);
+}
+
 bool
 Server::handleRequest(TCPSocketResponder& responder)
 {
@@ -457,9 +457,12 @@ Server::initiate(int port, const char* settingsPath)
 		if (!ServerUtils::readSettings(settings, settingsPath))
 			return;
 
+#ifndef ASYNC_SERVER
 		applySettings(settings);
-		//runServer(port);
+		runServer(port);
+#else
 		sThread = std::thread(runServer, port);
+#endif
 #ifndef WIN32
 		ServerUtils::setupQuitHandler();
 #endif
